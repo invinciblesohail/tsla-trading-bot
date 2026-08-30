@@ -1,0 +1,19 @@
+# Secrets - never commit the real config
+tsla_bot/config.py
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Logs and trade data (grows constantly, and may be considered sensitive/proprietary)
+logs/*.csv
+logs/*.log
+logs/heartbeat.txt
+logs/watchdog.log
+
+# Streamlit
+.streamlit/secrets.toml
+
+# OS noise
+.DS_Store
