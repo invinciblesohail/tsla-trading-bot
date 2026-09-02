@@ -1,11 +1,12 @@
 """
-TSLA Bot Dashboard v2 - restyled to match the client's other project's
-dashboard (dark theme, login gate, sidebar status panel, positions table,
-system log terminal), while keeping the decision-log analysis sections
-built for THIS spec (NO-ENTRY reason breakdown, factor score comparison,
-overnight split, full decision log) - those don't exist in the reference
-dashboard since it's a different (options) system, but the client
-specifically asked the logging system to enable them here, so they stay.
+TSLA Bot Dashboard v2 - ES (Spanish UI translation)
+All user-facing text translated to Spanish. Underlying data VALUES
+(tipo_decision: ENTRY/NO-ENTRY/NO-SETUP, resultado: WIN/LOSS,
+filtro_bloqueador: fuera_sesion/posicion_abierta/etc.) are left unchanged
+since they are literal stored CSV data per the client's own logging spec,
+not free UI text - translating them would require changing
+decision_logger.py too and risks breaking filters/matching against
+existing data.
 """
 
 import os
@@ -21,13 +22,10 @@ import pytz
 
 from tsla_bot import config
 
-st.set_page_config(page_title="TSLA 3-Factor Bot", layout="wide", page_icon="🚗")
+st.set_page_config(page_title="Bot TSLA 3-Factores", layout="wide", page_icon="")
 
 # ============================================================
-# CUSTOM CSS - dark cards, status pills, log terminal
-# (Streamlit's theme config.toml handles the base palette; this covers
-# the specific widgets the base theme doesn't style: pills, terminal box,
-# login card.)
+# CSS PERSONALIZADO
 # ============================================================
 st.markdown("""
 <style>
@@ -52,31 +50,31 @@ NY_TZ = pytz.timezone("America/New_York")
 
 
 # ============================================================
-# LOGIN GATE
+# PANTALLA DE INICIO DE SESIÓN
 # ============================================================
 def login_screen():
     st.markdown("<div style='height: 80px'></div>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 1.2, 1])
     with col2:
         st.markdown(
-            "<div style='text-align:center'><span style='font-size:3em'>🚗⚡</span></div>",
+            "<div style='text-align:center'><span style='font-size:3em'>***</span></div>",
             unsafe_allow_html=True,
         )
         st.markdown(
-            "<h2 style='text-align:center; margin-bottom:0;'>TSLA 3-Factor Bot</h2>"
-            "<p style='text-align:center; color:#9CA3AF; letter-spacing:1px;'>PAPER TRADING SYSTEM</p>",
+            "<h2 style='text-align:center; margin-bottom:0;'>Bot TSLA 3-Factores</h2>"
+            "<p style='text-align:center; color:#9CA3AF; letter-spacing:1px;'>SISTEMA DE TRADING SIMULADO (PAPER)</p>",
             unsafe_allow_html=True,
         )
         with st.form("login_form"):
-            username = st.text_input("USERNAME")
-            password = st.text_input("PASSWORD", type="password")
-            submitted = st.form_submit_button("Sign In", use_container_width=True)
+            username = st.text_input("USUARIO")
+            password = st.text_input("CONTRASEÑA", type="password")
+            submitted = st.form_submit_button("Iniciar Sesión", use_container_width=True)
             if submitted:
                 if username == config.DASHBOARD_USERNAME and password == config.DASHBOARD_PASSWORD:
                     st.session_state["authenticated"] = True
                     st.rerun()
                 else:
-                    st.error("Invalid username or password.")
+                    st.error("Usuario o contraseña inválidos.")
 
 
 if "authenticated" not in st.session_state:
@@ -88,7 +86,7 @@ if not st.session_state["authenticated"]:
 
 
 # ============================================================
-# DATA LOADING
+# CARGA DE DATOS
 # ============================================================
 @st.cache_data(ttl=30)
 def load_data():
@@ -104,7 +102,7 @@ def load_data():
         df["datetime_et"] = pd.to_datetime(df["fecha"].astype(str) + " " + df["hora_et"].astype(str))
         return df
     except Exception as e:
-        st.error(f"Error loading master CSV: {e}")
+        st.error(f"Error al cargar el CSV maestro: {e}")
         return None
 
 
@@ -132,68 +130,68 @@ def get_market_status():
 def read_recent_logs(n_lines=60):
     log_path = f"{config.LOG_DIR}/tsla_engine.log"
     if not os.path.exists(log_path):
-        return "No engine log found yet."
+        return "Aún no se encontró el registro del motor."
     with open(log_path, "r", errors="ignore") as f:
         lines = f.readlines()
-    return "".join(lines[-n_lines:]) if lines else "(log file is empty)"
+    return "".join(lines[-n_lines:]) if lines else "(el archivo de registro está vacío)"
 
 
 df = load_data()
 
 # ============================================================
-# SIDEBAR - connection, market status, NY time, Gateway, last poll
+# BARRA LATERAL - conexión, estado del mercado, hora NY, Gateway
 # ============================================================
 with st.sidebar:
-    st.markdown("### 🚗⚡ TSLA Bot")
-    st.caption("3-Factor Paper Trading System")
+    st.markdown("### Bot TSLA")
+    st.caption("Sistema de Trading Simulado - 3 Factores")
     st.markdown("---")
 
     connected, hb_ts = get_heartbeat_status()
     if connected:
-        st.markdown('<span class="status-pill pill-green">● CONNECTED</span>', unsafe_allow_html=True)
+        st.markdown('<span class="status-pill pill-green">● CONECTADO</span>', unsafe_allow_html=True)
     else:
-        st.markdown('<span class="status-pill pill-red">● DISCONNECTED</span>', unsafe_allow_html=True)
+        st.markdown('<span class="status-pill pill-red">● DESCONECTADO</span>', unsafe_allow_html=True)
 
     st.markdown("---")
 
     market_open, now_et = get_market_status()
     if market_open:
-        st.markdown('<p class="sidebar-label">Market</p>'
-                     '<p class="sidebar-value">🟢 Market Open</p>', unsafe_allow_html=True)
+        st.markdown('<p class="sidebar-label">Mercado</p>'
+                     '<p class="sidebar-value">🟢 Mercado Abierto</p>', unsafe_allow_html=True)
     else:
-        st.markdown('<p class="sidebar-label">Market</p>'
-                     '<p class="sidebar-value">🟡 Market Closed</p>', unsafe_allow_html=True)
+        st.markdown('<p class="sidebar-label">Mercado</p>'
+                     '<p class="sidebar-value">🟡 Mercado Cerrado</p>', unsafe_allow_html=True)
 
-    st.markdown(f'<p class="sidebar-label">NY Time</p>'
+    st.markdown(f'<p class="sidebar-label">Hora NY</p>'
                 f'<p class="sidebar-value">{now_et.strftime("%H:%M:%S")}</p>', unsafe_allow_html=True)
 
     st.markdown(f'<p class="sidebar-label">Gateway</p>'
                 f'<p class="sidebar-value">{config.IB_HOST}:{config.IB_PORT} (paper)</p>', unsafe_allow_html=True)
 
     if hb_ts is not None:
-        st.markdown(f'<p class="sidebar-label">Last heartbeat</p>'
+        st.markdown(f'<p class="sidebar-label">Última señal (heartbeat)</p>'
                      f'<p class="sidebar-value">{hb_ts.tz_convert(NY_TZ).strftime("%d %b %Y, %H:%M:%S")}</p>',
                      unsafe_allow_html=True)
 
     st.markdown("---")
-    if st.button("🔄 Refresh"):
+    if st.button("🔄 Actualizar"):
         st.cache_data.clear()
         st.rerun()
-    if st.button("Log out"):
+    if st.button("Cerrar sesión"):
         st.session_state["authenticated"] = False
         st.rerun()
 
 
 # ============================================================
-# MAIN
+# PRINCIPAL
 # ============================================================
-st.markdown("## 📈 Live Trading Monitor")
+st.markdown("## 📈 Monitor de Trading en Vivo")
 
 if df is None:
-    st.info("Waiting for the engine to start (logs/tsla_decisiones_master.csv not found yet).")
+    st.info("Esperando a que el motor inicie (aún no se encuentra logs/tsla_decisiones_master.csv).")
     st.stop()
 if df.empty:
-    st.info("Engine is running but no decisions logged yet.")
+    st.info("El motor está funcionando, pero aún no se han registrado decisiones.")
     st.stop()
 
 entries = df[df["tipo_decision"] == "ENTRY"].copy()
@@ -202,19 +200,19 @@ open_trades = entries[entries["resultado"].isna() | (entries["resultado"] == "")
 no_entry = df[df["tipo_decision"] == "NO-ENTRY"].copy()
 no_setup = df[df["tipo_decision"] == "NO-SETUP"].copy()
 
-# ---------------- Open position ----------------
-tab_open, tab_closed = st.tabs([f"📂 Open Position ({len(open_trades)})", f"✅ Closed Trades ({len(closed)})"])
+# ---------------- Posición abierta ----------------
+tab_open, tab_closed = st.tabs([f"📂 Posición Abierta ({len(open_trades)})", f"✅ Operaciones Cerradas ({len(closed)})"])
 
 with tab_open:
     if open_trades.empty:
-        st.caption("No open position.")
+        st.caption("Sin posición abierta.")
     else:
         show_cols = ["fecha", "hora_et", "direccion", "precio_entrada", "stop", "target", "acciones", "riesgo_usd"]
         st.dataframe(open_trades[show_cols], use_container_width=True, hide_index=True)
 
 with tab_closed:
     if closed.empty:
-        st.caption("No closed trades yet.")
+        st.caption("Aún no hay operaciones cerradas.")
     else:
         show_cols = ["fecha", "hora_et", "direccion", "precio_entrada", "precio_salida",
                      "motivo_salida", "resultado", "pnl_usd", "pnl_pct", "overnight"]
@@ -233,7 +231,7 @@ with tab_closed:
 
 st.markdown("---")
 
-# ---------------- Metric cards ----------------
+# ---------------- Tarjetas de métricas ----------------
 if not closed.empty:
     wins = closed[closed["resultado"] == "WIN"]
     losses = closed[closed["resultado"] == "LOSS"]
@@ -250,53 +248,53 @@ if not closed.empty:
     net_pnl = closed["pnl_usd"].sum()
 
     col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("Closed Trades", len(closed))
-    col2.metric("Win Rate", f"{win_rate:.1f}%")
-    col3.metric("PF ($, compounding)", f"{pf_dollars:.2f}")
-    col4.metric("PF (%, real edge)", f"{pf_normalized:.2f}")
-    col5.metric("Net PnL", f"${net_pnl:,.2f}")
+    col1.metric("Operaciones Cerradas", len(closed))
+    col2.metric("Tasa de Acierto", f"{win_rate:.1f}%")
+    col3.metric("FB ($, compuesto)", f"{pf_dollars:.2f}")
+    col4.metric("FB (%, ventaja real)", f"{pf_normalized:.2f}")
+    col5.metric("PnL Neto", f"${net_pnl:,.2f}")
 
 st.markdown("---")
 
-# ---------------- Equity curve ----------------
+# ---------------- Curva de capital ----------------
 if not closed.empty:
     closed_sorted = closed.sort_values("datetime_et").copy()
     closed_sorted["cum_pnl"] = closed_sorted["pnl_usd"].cumsum()
     fig_equity = px.line(closed_sorted, x="datetime_et", y="cum_pnl",
-                          title="Cumulative PnL (closed trades)",
+                          title="PnL Acumulado (operaciones cerradas)",
                           template="plotly_dark",
                           color_discrete_sequence=["#3B82F6"])
-    fig_equity.update_layout(yaxis_title="Cumulative PnL ($)", xaxis_title="Time",
+    fig_equity.update_layout(yaxis_title="PnL Acumulado ($)", xaxis_title="Tiempo",
                               paper_bgcolor="#0B0E14", plot_bgcolor="#0B0E14")
     st.plotly_chart(fig_equity, use_container_width=True)
 
 st.markdown("---")
 
-# ---------------- Why trades didn't happen ----------------
-st.markdown("### 🚧 Why trades didn't happen")
+# ---------------- Por qué no se abrieron operaciones ----------------
+st.markdown("### 🚧 Por qué no se abrieron operaciones")
 col_a, col_b = st.columns(2)
 
 with col_a:
     if not no_entry.empty:
         reason_counts = no_entry["filtro_bloqueador"].value_counts().reset_index()
-        reason_counts.columns = ["reason", "count"]
-        fig_reasons = px.bar(reason_counts, x="reason", y="count",
-                              title=f"NO-ENTRY reasons (n={len(no_entry)})",
+        reason_counts.columns = ["motivo", "cantidad"]
+        fig_reasons = px.bar(reason_counts, x="motivo", y="cantidad",
+                              title=f"Motivos de NO-ENTRADA (n={len(no_entry)})",
                               template="plotly_dark",
                               color_discrete_sequence=["#EF4444"])
         fig_reasons.update_layout(paper_bgcolor="#0B0E14", plot_bgcolor="#0B0E14")
         st.plotly_chart(fig_reasons, use_container_width=True)
     else:
-        st.info("No NO-ENTRY decisions logged yet.")
+        st.info("Aún no se han registrado decisiones NO-ENTRY.")
 
 with col_b:
     total_decisions = len(df)
     breakdown = pd.DataFrame({
-        "type": ["ENTRY", "NO-ENTRY", "NO-SETUP"],
-        "count": [len(entries), len(no_entry), len(no_setup)],
+        "tipo": ["ENTRY", "NO-ENTRY", "NO-SETUP"],
+        "cantidad": [len(entries), len(no_entry), len(no_setup)],
     })
-    fig_breakdown = px.pie(breakdown, values="count", names="type",
-                            title=f"All decisions (n={total_decisions})",
+    fig_breakdown = px.pie(breakdown, values="cantidad", names="tipo",
+                            title=f"Todas las decisiones (n={total_decisions})",
                             hole=0.4,
                             color_discrete_sequence=["#10D98A", "#EF4444", "#787B86"])
     fig_breakdown.update_layout(paper_bgcolor="#0B0E14", plot_bgcolor="#0B0E14")
@@ -304,55 +302,58 @@ with col_b:
 
 st.markdown("---")
 
-# ---------------- Factor discrimination ----------------
-st.markdown("### 🔍 Factor score comparison: Wins vs Losses")
+# ---------------- Discriminación de factores ----------------
+st.markdown("### 🔍 Comparación de puntaje por factor: Ganancias vs Pérdidas")
 if not closed.empty and len(wins) > 0 and len(losses) > 0:
     def side_score(row, factor):
         col = f"{factor}_call" if row["direccion"] == "CALL" else f"{factor}_put"
         return row[col]
 
     factor_rows = []
-    for label, subset in [("WIN", wins), ("LOSS", losses)]:
+    for label, subset in [("GANANCIA", wins), ("PÉRDIDA", losses)]:
         for factor in ["trend", "bb", "space"]:
             vals = subset.apply(lambda r: side_score(r, factor), axis=1)
-            factor_rows.append({"Outcome": label, "Factor": factor, "Avg Score": vals.mean()})
+            factor_rows.append({"Resultado": label, "Factor": factor, "Puntaje Promedio": vals.mean()})
     factor_df = pd.DataFrame(factor_rows)
 
-    fig_factors = px.bar(factor_df, x="Factor", y="Avg Score", color="Outcome",
-                          barmode="group", title="Average factor score (on the side actually traded): Win vs Loss",
+    fig_factors = px.bar(factor_df, x="Factor", y="Puntaje Promedio", color="Resultado",
+                          barmode="group", title="Puntaje promedio por factor (del lado operado): Ganancia vs Pérdida",
                           template="plotly_dark",
-                          color_discrete_map={"WIN": "#10D98A", "LOSS": "#EF4444"})
+                          color_discrete_map={"GANANCIA": "#10D98A", "PÉRDIDA": "#EF4444"})
     fig_factors.update_layout(paper_bgcolor="#0B0E14", plot_bgcolor="#0B0E14")
     st.plotly_chart(fig_factors, use_container_width=True)
-    st.caption("A factor with similar averages for WIN and LOSS isn't discriminating well - "
-               "candidate for reweighting, per the client's stated reason for wanting this breakdown.")
+    st.caption("Un factor con promedios similares entre ganancias y pérdidas no está discriminando bien - "
+               "candidato a reponderar, según el motivo que dio el cliente para pedir este análisis.")
 else:
-    st.info("Need both wins and losses logged to compare factor discrimination.")
+    st.info("Se necesitan tanto ganancias como pérdidas registradas para comparar la discriminación de factores.")
 
 st.markdown("---")
 
-# ---------------- Overnight vs Intraday ----------------
-st.markdown("### 🌙 Overnight vs Intraday")
+# ---------------- Nocturno vs Intradía ----------------
+st.markdown("### Nocturno vs Intradía")
 if not closed.empty:
     overnight_pnl = closed.groupby("overnight")["pnl_usd"].agg(["count", "sum", "mean"]).reset_index()
-    overnight_pnl.columns = ["Overnight?", "Trades", "Total PnL", "Avg PnL"]
+    overnight_pnl.columns = ["¿Nocturno?", "Operaciones", "PnL Total", "PnL Promedio"]
     st.dataframe(overnight_pnl, use_container_width=True, hide_index=True)
 
 st.markdown("---")
 
-# ---------------- System logs ----------------
-st.markdown("### 🖥️ System Logs")
+# ---------------- Registros del sistema ----------------
+st.markdown("### egistros del Sistema")
 log_text = read_recent_logs(60)
 st.markdown(f'<div class="log-terminal">{log_text}</div>', unsafe_allow_html=True)
 
 st.markdown("---")
 
-# ---------------- Full decision log ----------------
-st.markdown("### 📜 Full Decision Log")
+# ---------------- Registro completo de decisiones ----------------
+st.markdown("### Registro Completo de Decisiones")
+
+TIPO_LABELS_ES = {"ENTRY": "ENTRADA", "NO-ENTRY": "NO-ENTRADA", "NO-SETUP": "SIN CONFIGURACIÓN"}
 decision_filter = st.multiselect(
-    "Filter by decision type",
+    "Filtrar por tipo de decisión",
     options=["ENTRY", "NO-ENTRY", "NO-SETUP"],
     default=["ENTRY", "NO-ENTRY", "NO-SETUP"],
+    format_func=lambda x: TIPO_LABELS_ES.get(x, x),
 )
 display_df = df[df["tipo_decision"].isin(decision_filter)].sort_values("datetime_et", ascending=False)
 st.dataframe(display_df.drop(columns=["datetime_et"]), use_container_width=True, hide_index=True)

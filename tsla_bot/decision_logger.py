@@ -196,26 +196,36 @@ class DecisionLogger:
         self._open_trade_rows[trade_key] = row
         return row
 
-    def update_entry_fill(self, trade_key, real_entry_price, real_risk_usd):
+    def update_entry_fill_and_bracket(self, trade_key, real_entry_price, real_stop,
+                                        real_target, real_risk_usd):
         """
-        Corrects precio_entrada/riesgo_usd once the ENTRY order's actual fill
-        price is known (see engine.py on_order_status). Necessary because the
-        row is initially logged using the signal bar's delayed-data close as
-        an approximation, before the real market order has actually filled -
-        confirmed live to diverge meaningfully (17x PnL discrepancy on the
-        first real trade) since delayed data can be 15-20 min stale.
+        Replaces the old update_entry_fill(). Now that engine.py places the
+        stop/target orders AFTER the real entry fill is known (rather than
+        estimating them upfront from the approximate delayed-data signal
+        price), this patches precio_entrada, stop, target, AND riesgo_usd
+        together - all four are now correct and internally consistent by
+        construction, not approximated-then-corrected.
+
+        Fixes a confirmed live bug where only precio_entrada was corrected,
+        leaving stop/target anchored to the old approximate price - this
+        made the logged SL/TP ratio appear wildly inconsistent (0.2x to
+        12.3x ATR instead of the configured 2.4x/3.0x) even though the ATR
+        value itself was always read correctly. Client-reported and
+        verified: the size of the ratio distortion correlated almost
+        exactly with the size of the entry-price correction on each trade.
         """
         entry_row = self._open_trade_rows.get(trade_key)
         if entry_row is None:
             return  # trade already closed or unknown - nothing to correct
 
-        entry_row["precio_entrada"] = _fmt_price(real_entry_price)
-        entry_row["riesgo_usd"] = _fmt_price(real_risk_usd)
-
         patch = {
             "precio_entrada": _fmt_price(real_entry_price),
+            "stop": _fmt_price(real_stop),
+            "target": _fmt_price(real_target),
             "riesgo_usd": _fmt_price(real_risk_usd),
         }
+        entry_row.update(patch)
+
         op_id = entry_row["op_id"]
         entry_date_str = entry_row["fecha"]
         daily_path = self._daily_csv_path(entry_date_str)

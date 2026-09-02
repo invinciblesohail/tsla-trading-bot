@@ -362,20 +362,37 @@ class TslaBotEngine:
     # ---------------- order management ----------------
 
     def open_new_position(self, bar_time, ny_time, row, scores, side):
-        # NOTE: backtest fills at the NEXT bar's open (FIX 5). Live, we act
-        # immediately on the closed bar via a market order - this is the
-        # natural live equivalent (can't know the "next bar's open" in
-        # advance), but expect some slippage vs. the backtest's assumption.
-        # Worth comparing live fills to this assumption once the paper run
-        # has real data.
+        # ARCHITECTURE FIX (confirmed live bug, client-reported): previously
+        # submitted the FULL bracket (entry + stop + target) simultaneously,
+        # computing stop/target from the SIGNAL bar's approximate delayed-
+        # data close. When the entry-price-correction fix later patched
+        # precio_entrada to the REAL fill, stop/target were never re-anchored
+        # - they stayed fixed at the pre-correction levels. Verified against
+        # 7 live trades: the size of each trade's SL/TP-ratio distortion
+        # correlated almost perfectly with the size of its entry-price
+        # correction (e.g. trade 498: $6.63 correction -> 12.3x ATR stop
+        # instead of 2.4x). This is NOT an ATR-timing bug - ATR itself was
+        # read correctly, once, at the right bar. The bug was placing
+        # protective orders before the real entry price was known.
+        #
+        # FIX: place ONLY the market entry now. Compute and submit stop/
+        # target ONLY after the entry's real fill price is confirmed (see
+        # on_order_status). This guarantees stop/target are ALWAYS exactly
+        # sl_atr/tp_atr x ATR from the true entry, every trade, no
+        # after-the-fact correction ever needed again.
+        #
+        # Residual risk, disclosed: there's a brief window (typically 1-2
+        # seconds, based on observed live fill speed) between the entry
+        # filling and the stop/target orders being submitted, during which
+        # the position has no resting protective order. Far smaller than
+        # the ~24h unprotected window from the earlier TIF/GTC bug, but
+        # not zero - flagged transparently rather than hidden.
         close = row["close"]
         atr = row["atr"]
         if side == "CALL":
             stop = close - strat.CONFIG["sl_atr"] * atr
-            target = close + strat.CONFIG["tp_atr"] * atr
         else:
             stop = close + strat.CONFIG["sl_atr"] * atr
-            target = close - strat.CONFIG["tp_atr"] * atr
 
         shares = position_size_risk_pct(self.balance, close, stop)
         if shares <= 0:
@@ -385,22 +402,69 @@ class TslaBotEngine:
             return
 
         action = "BUY" if side == "CALL" else "SELL"
-        reverse_action = "SELL" if action == "BUY" else "BUY"
 
-        # CRITICAL FIX: tif defaults to empty on ib_insync Order objects,
-        # which let IBKR's account-level preset silently force TIF=DAY on
-        # every bracket order (confirmed via "Error 10349: Order TIF was
-        # set to DAY based on order preset" in the live log). DAY orders
-        # expire at end of trading session - this strategy explicitly
-        # allows overnight holds, so a DAY-expired bracket left a real
-        # position with ZERO stop/target protection for ~24 hours,
-        # confirmed live (position lost -$441 with no stop ever firing).
-        # GTC (Good-Til-Cancelled) is required for every leg.
         parent_id = self.ib.client.getReqId()
         parent = MarketOrder(action, shares)
         parent.orderId = parent_id
-        parent.transmit = False
+        parent.transmit = True
         parent.tif = "GTC"
+
+        parent_trade = self.ib.placeOrder(self.contract, parent)
+
+        trade_key = f"{side}_{bar_time.isoformat()}"
+        # Log the ENTRY decision immediately (for audit/timing), with
+        # PROVISIONAL stop/target based on the signal price - these get
+        # corrected to the real, ratio-correct values the moment the fill
+        # confirms (see on_order_status), same as precio_entrada already was.
+        target_provisional = close + strat.CONFIG["tp_atr"] * atr if side == "CALL" \
+            else close - strat.CONFIG["tp_atr"] * atr
+        log_row = self.logger.log_entry(
+            ny_time, scores, side, close, stop, target_provisional, shares, trade_key
+        )
+
+        self.open_position = {
+            "side": side,
+            "entry_time": bar_time,
+            "entry_price": close,   # provisional - corrected on fill, see on_order_status
+            "atr": atr,             # LOCKED at signal time - never recalculated
+            "stop": stop,           # provisional until fill confirms
+            "target": target_provisional,
+            "shares": shares,
+            "trade_key": trade_key,
+            "parent_order_id": parent_id,
+            "parent_trade": parent_trade,
+            "stop_order_id": None,   # not yet placed - see on_order_status
+            "target_order_id": None,
+            "stop_trade": None,
+            "target_trade": None,
+            "bracket_placed": False,
+            "bars_held": 0,
+        }
+
+        if side == "CALL":
+            self.last_call_time = bar_time
+        else:
+            self.last_put_time = bar_time
+
+        log.info("ENTRY %s shares=%d signal_price~%.2f (bracket pending real fill)",
+                  side, shares, close)
+
+    def _place_bracket_after_fill(self, pos, real_entry_price):
+        """Called once the entry order's real fill is confirmed. Computes
+        stop/target from the REAL entry price (never the approximate signal
+        price), guaranteeing the exact configured ATR ratio every time."""
+        atr = pos["atr"]
+        side = pos["side"]
+        shares = pos["shares"]
+        if side == "CALL":
+            stop = real_entry_price - strat.CONFIG["sl_atr"] * atr
+            target = real_entry_price + strat.CONFIG["tp_atr"] * atr
+        else:
+            stop = real_entry_price + strat.CONFIG["sl_atr"] * atr
+            target = real_entry_price - strat.CONFIG["tp_atr"] * atr
+
+        reverse_action = "SELL" if side == "CALL" else "BUY"
+        parent_id = pos["parent_order_id"]
 
         target_order = LimitOrder(reverse_action, shares, round(target, 2))
         target_order.orderId = self.ib.client.getReqId()
@@ -418,41 +482,25 @@ class TslaBotEngine:
         stop_order.transmit = True
         stop_order.tif = "GTC"
 
-        parent_trade = self.ib.placeOrder(self.contract, parent)
         target_trade = self.ib.placeOrder(self.contract, target_order)
         stop_trade = self.ib.placeOrder(self.contract, stop_order)
 
-        trade_key = f"{side}_{bar_time.isoformat()}"
-        log_row = self.logger.log_entry(
-            ny_time, scores, side, close, stop, target, shares, trade_key
+        pos["stop"] = stop
+        pos["target"] = target
+        pos["stop_order_id"] = stop_order.orderId
+        pos["target_order_id"] = target_order.orderId
+        pos["stop_trade"] = stop_trade
+        pos["target_trade"] = target_trade
+        pos["bracket_placed"] = True
+
+        real_risk_usd = abs(real_entry_price - stop) * shares
+        self.logger.update_entry_fill_and_bracket(
+            pos["trade_key"], real_entry_price, stop, target, real_risk_usd
         )
 
-        self.open_position = {
-            "side": side,
-            "entry_time": bar_time,
-            "entry_price": close,   # approximate - real fill price comes via orderStatus
-            "stop": stop,
-            "target": target,
-            "shares": shares,
-            "trade_key": trade_key,
-            "stop_order_id": stop_order.orderId,
-            "target_order_id": target_order.orderId,
-            "parent_order_id": parent_id,
-            "parent_trade": parent_trade,
-            "stop_trade": stop_trade,
-            "target_trade": target_trade,
-            "bars_held": 0,
-        }
-
-        if side == "CALL":
-            self.last_call_time = bar_time
-        else:
-            self.last_put_time = bar_time
-
-        log.info("ENTRY %s shares=%d entry~%.2f stop=%.2f target=%.2f",
-                  side, shares, close, stop, target)
-        risk_usd = abs(close - stop) * shares
-        alerts.alert_trade_open(side, close, stop, target, shares, risk_usd)
+        log.info("Bracket placed after fill: entry=%.2f stop=%.2f (%.2fx ATR) target=%.2f (%.2fx ATR)",
+                  real_entry_price, stop, strat.CONFIG["sl_atr"], target, strat.CONFIG["tp_atr"])
+        alerts.alert_trade_open(side, real_entry_price, stop, target, shares, real_risk_usd)
 
     def manage_open_position(self, bar_time, row):
         """Check whether the just-closed bar hit stop/target (belt-and-suspenders
@@ -494,23 +542,24 @@ class TslaBotEngine:
             self._pending_emergency_flatten_order_id = None
             return
 
-        # ENTRY order filled: correct the approximate delayed-data entry_price
-        # to the REAL fill price. Confirmed live this matters a lot: the
-        # first real trade showed a 17x PnL discrepancy (our calc: $124.96,
-        # IBKR's actual realizedPNL: $7.41) traced directly to using the
-        # delayed signal-bar close instead of the real fill price here.
-        if order_id == pos.get("parent_order_id") and trade.orderStatus.status == "Filled":
+        # ENTRY order filled: NOW place stop/target using the REAL fill
+        # price (see _place_bracket_after_fill) - this is the actual fix,
+        # not just a log correction. Guarantees stop/target are always
+        # exactly sl_atr/tp_atr x ATR from the true entry.
+        if order_id == pos.get("parent_order_id") and trade.orderStatus.status == "Filled" \
+                and not pos.get("bracket_placed"):
             real_entry_price = trade.orderStatus.avgFillPrice
             if real_entry_price and real_entry_price > 0:
-                old_price = pos["entry_price"]
                 pos["entry_price"] = real_entry_price
-                real_risk_usd = abs(real_entry_price - pos["stop"]) * pos["shares"]
-                self.logger.update_entry_fill(pos["trade_key"], real_entry_price, real_risk_usd)
-                log.info("Entry fill corrected: approx=%.2f -> real=%.2f (diff=%.2f)",
-                          old_price, real_entry_price, real_entry_price - old_price)
+                self._place_bracket_after_fill(pos, real_entry_price)
+            else:
+                log.error("Entry filled but avgFillPrice invalid (%s) - cannot place bracket. "
+                          "Position is UNPROTECTED - manual intervention needed.", real_entry_price)
+                alerts.alert_engine_error(f"Entry filled with invalid fill price ({real_entry_price}) - "
+                                           f"bracket NOT placed, position unprotected. Check manually now.")
             return
 
-        if order_id not in (pos["stop_order_id"], pos["target_order_id"]):
+        if pos["stop_order_id"] is None or order_id not in (pos["stop_order_id"], pos["target_order_id"]):
             return
 
         # CRITICAL SAFETY FIX: if a bracket leg gets CANCELLED (not filled)
