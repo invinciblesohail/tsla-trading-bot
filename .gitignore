@@ -7,7 +7,7 @@ __pycache__/
 .venv/
 
 # Logs and trade data (grows constantly, and may be considered sensitive/proprietary)
-logs/*.csv
+logs/*.csv*
 logs/*.log
 logs/heartbeat.txt
 logs/watchdog.log
