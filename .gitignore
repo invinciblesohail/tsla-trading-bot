@@ -17,3 +17,4 @@ logs/watchdog.log
 
 # OS noise
 .DS_Store
+tsla_bot/engine_old.py
