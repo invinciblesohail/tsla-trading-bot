@@ -99,6 +99,45 @@ class TslaBotEngine:
                       "(client's explicit instruction). Verify config before deploying.")
         self.connect()
 
+        # CRITICAL SAFETY CHECK (added after a real live incident): a fresh
+        # engine process always starts with self.open_position = None,
+        # with ZERO memory of anything that happened in a previous process.
+        # If the engine was restarted while a real position was open (e.g.
+        # for a config/Telegram change), it would previously start up
+        # completely blind to that position - risking a NEW signal opening
+        # a SECOND position on top of it. Confirmed live: this happened,
+        # leaving a -150 share position with no bracket protection and no
+        # log record, undetected until manually noticed.
+        #
+        # Fix: before doing anything else, ask IBKR directly what the real
+        # position is. If it's nonzero, REFUSE to proceed - this is not
+        # something safe to auto-resolve (we don't know the original
+        # stop/target/ATR to reconstruct proper protection), so it requires
+        # a human to manually flatten or otherwise resolve the position
+        # before the engine can safely start.
+        self.ib.reqPositions()
+        self.ib.sleep(2)  # give IBKR a moment to respond
+        real_position = 0.0
+        for p in self.ib.positions():
+            if p.contract.symbol == config.SYMBOL:
+                real_position = p.position
+
+        if real_position != 0:
+            msg = (f"STARTUP BLOCKED: IBKR shows a real {config.SYMBOL} position of "
+                   f"{real_position} shares, but this engine process has no record of it "
+                   f"(fresh start = no memory of prior trades). This is EXACTLY the gap "
+                   f"that caused a real incident before - refusing to start rather than "
+                   f"risk opening a second position on top of this one. "
+                   f"Manually resolve the existing position first (flatten it and correct "
+                   f"the decision log), THEN restart the engine.")
+            log.error(msg)
+            alerts.alert_engine_error(msg)
+            self.ib.disconnect()
+            raise RuntimeError(msg)
+
+        log.info("Startup reconciliation OK: IBKR confirms 0 shares of %s - safe to proceed.",
+                  config.SYMBOL)
+
         # NOTE: keepUpToDate=True historical bars were CONFIRMED (isolated
         # diagnostic test) to deliver ZERO updates under delayed market data
         # on this account, even during active market hours. Rather than rely
