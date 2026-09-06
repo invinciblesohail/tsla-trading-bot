@@ -19,8 +19,8 @@
 # ============================================================================
 
 SESSION="tsla"
-PROJECT_DIR="$HOME/tsla_project/tsla_paper_engine"
-VENV_ACTIVATE="$HOME/tsla_project/.venv/bin/activate"
+PROJECT_DIR="$HOME/tsla_bot"
+VENV_ACTIVATE="$HOME/tsla_bot/.venv/bin/activate"
 
 # If the session already exists, don't create duplicates - just tell the
 # user how to attach instead.
