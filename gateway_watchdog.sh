@@ -18,7 +18,7 @@
 # ============================================================================
 
 GATEWAY_PORT=4002
-IBC_START_SCRIPT="$HOME/tsla_project/opt/ibc/gatewaystart.sh"
+IBC_START_SCRIPT="$HOME/opt/ibc/gatewaystart.sh"
 LOG_PREFIX="[watchdog $(date -u '+%Y-%m-%d %H:%M:%S UTC')]"
 
 if ss -tlnp 2>/dev/null | grep -q ":$GATEWAY_PORT "; then
