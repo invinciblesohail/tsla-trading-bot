@@ -477,6 +477,7 @@ class TslaBotEngine:
             "stop_trade": None,
             "target_trade": None,
             "bracket_placed": False,
+            "emergency_flatten_triggered": False,
             "bars_held": 0,
         }
 
@@ -502,21 +503,27 @@ class TslaBotEngine:
             stop = real_entry_price + strat.CONFIG["sl_atr"] * atr
             target = real_entry_price - strat.CONFIG["tp_atr"] * atr
 
+        # BUG FIX (confirmed live, Sept 9): parentId links a child order to a
+        # PENDING parent - but by the time we get here, the entry order is
+        # already FILLED, not pending. Linking stop/target to an already-
+        # completed "parent" triggered IBKR's own cancellation cascade
+        # (Error 201: "Parent order is being cancelled") seconds after
+        # submission, cancelling both legs. Since the entry is already
+        # done, stop/target don't need a parent/child relationship at all -
+        # they only need OCA linkage to EACH OTHER (one-cancels-other), and
+        # both can transmit immediately as independent orders.
         reverse_action = "SELL" if side == "CALL" else "BUY"
-        parent_id = pos["parent_order_id"]
 
         target_order = LimitOrder(reverse_action, shares, round(target, 2))
         target_order.orderId = self.ib.client.getReqId()
-        target_order.parentId = parent_id
-        target_order.ocaGroup = f"tsla_bracket_{parent_id}"
+        target_order.ocaGroup = f"tsla_bracket_{pos['parent_order_id']}"
         target_order.ocaType = 1
-        target_order.transmit = False
+        target_order.transmit = True
         target_order.tif = "GTC"
 
         stop_order = StopOrder(reverse_action, shares, round(stop, 2))
         stop_order.orderId = self.ib.client.getReqId()
-        stop_order.parentId = parent_id
-        stop_order.ocaGroup = f"tsla_bracket_{parent_id}"
+        stop_order.ocaGroup = f"tsla_bracket_{pos['parent_order_id']}"
         stop_order.ocaType = 1
         stop_order.transmit = True
         stop_order.tif = "GTC"
@@ -611,6 +618,20 @@ class TslaBotEngine:
         # cancelled unexpectedly for any other reason, flatten immediately
         # rather than silently leaving the position unprotected again.
         if trade.orderStatus.status == "Cancelled":
+            # IDEMPOTENCY GUARD (confirmed live, Sept 9): IBKR/ib_insync can
+            # report a SINGLE logical cancellation through MULTIPLE separate
+            # callback events (both legs transitioning through Cancelled
+            # more than once each). Without this guard, each callback fired
+            # a fresh full-size flatten order - confirmed live: one
+            # incident fired 4 flatten orders instead of 1, turning two
+            # small CALL entries into a runaway -225 share short position.
+            # Check and set the flag FIRST, before anything else, so any
+            # further Cancelled callbacks for this same position are
+            # ignored rather than triggering duplicate flattens.
+            if pos.get("emergency_flatten_triggered"):
+                return
+            pos["emergency_flatten_triggered"] = True
+
             other_leg_id = pos["target_order_id"] if order_id == pos["stop_order_id"] else pos["stop_order_id"]
             other_leg_trade = pos["target_trade"] if order_id == pos["stop_order_id"] else pos["stop_trade"]
             leg_name = "STOP" if order_id == pos["stop_order_id"] else "TARGET"
